@@ -13,3 +13,6 @@ build-hfs:
 build-docker:
 	make build-bi
 	make build-hfs
+
+run-db:
+	docker compose up sqld -d
