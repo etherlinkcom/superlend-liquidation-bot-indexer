@@ -1,0 +1,39 @@
+services:
+  sqld:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    restart: always
+    environment:
+      - SQLD_DB_PATH=/data/local.db
+      - SQLD_NODE=primary
+    volumes:
+      - ./local_database:/data
+    ports:
+      - "8080:8080"
+  
+  borrowers_indexer:
+    # build:
+    #   context: .
+    #   dockerfile: ./borrowers_indexer/Dockerfile
+    #   target: final
+    image: localUser/borrowers-indexer:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - LIBSQL_URL=http://sqld:8080
+    depends_on:
+      - sqld
+
+  health_factor_service:
+    # build:
+    #   context: .
+    #   dockerfile: ./health_factor_service/Dockerfile
+    #   target: final
+    image: localUser/health-factor-service:latest
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - LIBSQL_URL=http://sqld:8080
+    depends_on:
+      - sqld
