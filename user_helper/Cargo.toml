@@ -1,0 +1,14 @@
+[package]
+name = "user_helper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+base_rpc_client = { path = "../base_rpc_client" }
+hex = "0.4.3"
+ethers-types-rs = "0.1.0"
+tracing = "0.1.40"
+
+[dev-dependencies]
+tokio = { version = "1.38.0", features = ["full"] }
+dotenv = "0.15.0"

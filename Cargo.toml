@@ -3,7 +3,7 @@ members = [
     "base_rpc_client",
     "borrowers_indexer",
     "database_manager",
-    "health_factor_service",
+    "health_factor_service", "user_helper",
 ]
 resolver = "2"
 

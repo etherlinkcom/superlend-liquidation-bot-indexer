@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 base_rpc_client = { path = "../base_rpc_client" }
 database_manager = { path = "../database_manager" }
+user_helper = { path = "../user_helper" }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 dotenv = "0.15.0"

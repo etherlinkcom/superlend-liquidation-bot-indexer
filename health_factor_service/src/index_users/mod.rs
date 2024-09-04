@@ -2,7 +2,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use base_rpc_client::BaseRpcClient;
 use database_manager::{
-    handler::user_table_handler::UserTableHandler,
+    handler::{
+        user_debt_collateral_table_handler::UserDebtCollateralTableHandler,
+        user_table_handler::UserTableHandler,
+    },
     health_factor_utils::{HealthFactorRange, HEALTH_FACTORS_RANGES},
     DatabaseManager,
 };
@@ -10,15 +13,15 @@ use tokio::{runtime::Handle, task::JoinHandle};
 use tracing::info;
 
 use chrono::{DateTime, Utc};
-
-mod fetch_debt_coll_assets;
-mod user_helper;
+use user_helper::{UserAccountData, UserReserveData};
 
 #[derive(Debug, Clone)]
 pub struct IndexerUsersConfig {
+    #[allow(dead_code)]
     pub pool_address: String,
     pub health_factor_variants: Vec<HealthFactorRange>,
     pub max_users_chunk_size: u64,
+    #[allow(dead_code)]
     pub cap_max_health_factor: f32,
 }
 impl Default for IndexerUsersConfig {
@@ -74,6 +77,8 @@ impl IndexerUsers {
 
         let mut variants_states = self.get_variant_states_map();
 
+        let user_helper = Arc::new(user_helper::UserHelper::new(self.provider.clone()).await);
+
         loop {
             let block_number = self.provider.get_block_number().await?;
             for (table_name, variant_state) in variants_states.iter_mut() {
@@ -92,34 +97,46 @@ impl IndexerUsers {
                 for chunk in users.chunks(self.config.max_users_chunk_size as usize) {
                     let users_chunk = chunk.to_vec();
 
-                    let mut tasks: Vec<JoinHandle<Result<f32, String>>> = Vec::new();
+                    let mut tasks: Vec<JoinHandle<(UserAccountData, UserReserveData)>> = Vec::new();
                     for (user_address, _) in users_chunk.clone() {
                         let user_address = user_address.clone();
-                        let provider = self.provider.clone();
-                        let config = self.config.clone();
+                        // let provider = self.provider.clone();
+                        // let config = self.config.clone();
+                        let user_helper = user_helper.clone();
                         tasks.push(tokio::spawn(async move {
-                            user_helper::fetch_user_health_factor(
-                                user_address.as_str(),
-                                provider,
-                                config,
-                            )
-                            .await
-                        }));
+                            let user_data: UserAccountData = match user_helper
+                                .get_user_account_data(user_address.as_str())
+                                .await
+                            {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    tracing::error!("Error fetching user data: {}", e);
+                                    panic!("Error fetching user data: {}", e);
+                                }
+                            };
+
+                            let user_reserve_data = match user_helper
+                                .get_user_reserve_data(user_address.as_str())
+                                .await
+                            {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    tracing::error!("Error fetching user reserve data: {}", e);
+                                    panic!("Error fetching user reserve data: {}", e);
+                                }
+                            };
+
+                            (user_data, user_reserve_data)
+                        }))
                     }
 
                     let results = futures::future::join_all(tasks).await;
 
                     for ((user_address, _), result) in users_chunk.iter().zip(results) {
-                        let health_factor = match result {
-                            Ok(data) => match data {
-                                Ok(health_factor) => health_factor,
-                                Err(e) => {
-                                    tracing::error!("Error fetching health factor: {}", e);
-                                    continue;
-                                }
-                            },
+                        let (user_data, user_reserve_data) = match result {
+                            Ok(data) => data,
                             Err(e) => {
-                                tracing::error!("Error fetching health factor: {}", e);
+                                tracing::error!("Error fetching user data: {}", e);
                                 continue;
                             }
                         };
@@ -128,8 +145,12 @@ impl IndexerUsers {
                             .db
                             .update_user_health_factor(
                                 user_address.as_str(),
-                                health_factor,
+                                user_data.health_factor,
                                 block_number,
+                                &user_reserve_data.leading_collateral_reserve,
+                                &user_reserve_data.leading_debt_reserve,
+                                user_data.collateral_value,
+                                user_data.debt_value,
                                 table_name,
                             )
                             .await?;
@@ -137,13 +158,61 @@ impl IndexerUsers {
                         if is_moved {
                             info!(
                                 "User {} moved to table from {} to {} with health factor {}",
-                                user_address, table_name, moved_table_name, health_factor
+                                user_address, table_name, moved_table_name, user_data.health_factor
                             );
                         } else {
                             info!(
                                 "User {} health factor updated to {}",
-                                user_address, health_factor
+                                user_address, user_data.health_factor
                             );
+                        }
+
+                        match self
+                            .db
+                            .insert_or_update_user_debt_collateral(
+                                user_address.as_str(),
+                                user_reserve_data
+                                    .collateral_assets
+                                    .into_iter()
+                                    .map(|asset| (asset.address, asset.amount_in_usd))
+                                    .collect::<Vec<(String, f32)>>(),
+                                true,
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!("User {} debt and collateral value updated", user_address);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Error updating user debt and collateral value: {}",
+                                    e
+                                );
+                            }
+                        }
+
+                        match self
+                            .db
+                            .insert_or_update_user_debt_collateral(
+                                user_address.as_str(),
+                                user_reserve_data
+                                    .debt_assets
+                                    .into_iter()
+                                    .map(|asset| (asset.address, asset.amount_in_usd))
+                                    .collect::<Vec<(String, f32)>>(),
+                                false,
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!("User {} debt and collateral value updated", user_address);
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Error updating user debt and collateral value: {}",
+                                    e
+                                );
+                            }
                         }
                     }
                 }

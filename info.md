@@ -10,25 +10,38 @@
     - block_number -> INTEGER DEFAULT 0
     - health_factor -> REAL DEFAULT 0.0
     - timestamp -> DATETIME DEFAULT CURRENT_TIMESTAMP
+    - totalDebtValueInUsd -> REAL DEFAULT 0.0
+    - totalCollateralValueInUsd -> REAL DEFAULT 0.0
+    - leadingCollateralReserve -> TEXT DEFAULT ""
+    - leadingDebtReserve -> TEXT DEFAULT ""
+
   - Last Index Block Table (Just one row)
     - id -> INTEGER PRIMARY KEY AUTOINCREMENT
     - block_number -> INTEGER DEFAULT 0
     - timestamp -> DATETIME DEFAULT CURRENT_TIMESTAMP
 
-  - Debt/Collateral Tables
+  - User Debt/Collateral Tables
+    - id -> INTEGER PRIMARY KEY AUTOINCREMENT
+    - user_address -> TEXT NOT NULL
+    - reserve_address -> TEXT NOT NULL
+    - amount -> REAL DEFAULT 0.0
+    - is_collateral -> BOOLEAN DEFAULT TRUE
+
+  <!-- - Debt/Collateral Tables
     - id -> INTEGER PRIMARY KEY AUTOINCREMENT
     - user_address -> TEXT UNIQUE
     - reserve_address -> TEXT
     - block_number -> INTEGER DEFAULT 0
     - isCollateral -> BOOLEAN // True if it is collateral, False if it is debt
-    - amount -> INTEGER
+    - amountInUsd -> INTEGER
     - query -> SELECT * FROM table WHERE user_address = ? ORDER BY amount DESC
     - Result data
-      | user_address | reserve_address | block_number | isCollateral | amount |
-      |--------------|-----------------|--------------|--------------|--------|
-      | user1        | reserve1        | 123          | True         | 200    |
-      | user1        | reserve3        | 123          | True         | 150    |
-      | user1        | reserve2        | 456          | False        | 100    |
+      | user_address | reserve_address | block_number | isCollateral | amountInUsd |
+      |--------------|-----------------|--------------|--------------|-------------|
+      | user1        | reserve1        | 123          | True         | 200USD      |
+      | user1        | reserve3        | 123          | True         | 100USD      |
+      | user1        | reserve2        | 456          | False        | 50USD       |
+      | user1        | reserve5        | 456          | False        | 100USD      | -->
 
 
 - Reset helper
@@ -39,8 +52,5 @@ DROP TABLE users;
 currentATokenBalance (uint256) : collateral
 currentVariableDebt (uint256) : debt
 
-0.8 > 50% liquidation threshold
-
-Time scale
-
-
+ => < 0.9 -> 100%
+=> 0.9 and < 1 -> 50%

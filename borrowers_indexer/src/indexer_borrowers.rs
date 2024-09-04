@@ -1,14 +1,15 @@
 use base_rpc_client::BaseRpcClient;
-use core::f32;
 use database_manager::{
     handler::{
-        last_index_block_handler::LastIndexBlockHandler, user_table_handler::UserTableHandler,
+        last_index_block_handler::LastIndexBlockHandler,
+        user_debt_collateral_table_handler::UserDebtCollateralTableHandler,
+        user_table_handler::UserTableHandler,
     },
     DatabaseManager,
 };
-use ethers_types_rs::U256;
 use std::sync::Arc;
 use tracing::{error, info};
+use user_helper::UserHelper;
 
 use crate::constant::BORROW_TOPIC;
 
@@ -20,6 +21,8 @@ pub struct IndexerConfig {
     pub max_parallel_requests: u64,
     pub delay_between_requests: u64,
     pub wait_block_diff: u64,
+
+    #[allow(dead_code)]
     pub cap_max_health_factor: u64,
 }
 
@@ -27,8 +30,8 @@ pub struct IndexerConfig {
 pub struct IndexerBorrowers {
     provider: Arc<BaseRpcClient>,
     db: Arc<DatabaseManager>,
+    user_helper: Arc<UserHelper>,
     config: IndexerConfig,
-    current_reserve: Option<Vec<String>>,
 }
 
 impl IndexerBorrowers {
@@ -37,71 +40,12 @@ impl IndexerBorrowers {
         db: Arc<DatabaseManager>,
         config: IndexerConfig,
     ) -> Self {
-        let mut indexer = Self {
-            provider,
+        Self {
+            provider: provider.clone(),
             db,
             config,
-            current_reserve: None,
-        };
-
-        match indexer.init_reserve().await {
-            Ok(_) => (),
-            Err(e) => {
-                error!("Failed to initialize reserve: {}", e);
-                std::process::exit(1);
-            }
+            user_helper: Arc::new(UserHelper::new(provider.clone()).await),
         }
-
-        indexer
-    }
-
-    // eth call getReservesList (d1946dbc)
-    async fn init_reserve(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let reserves = self
-            .provider
-            .eth_call(
-                "0x0000000000000000000000000000000000000000",
-                &self.config.pool_address,
-                "d1946dbc",
-                vec![],
-                Some("0".to_string()),
-            )
-            .await?;
-        // parse reserves
-        let result = reserves.get("result").unwrap().as_str().unwrap();
-        let addresses = Self::parse_reserve(result);
-        self.current_reserve = Some(addresses);
-
-        info!(
-            "Fetched reserve successfully: {:?}",
-            self.current_reserve.as_ref().unwrap()
-        );
-
-        Ok(())
-    }
-
-    fn parse_reserve(data: &str) -> Vec<String> {
-        let mut addresses = Vec::new();
-
-        let data_bytes = hex::decode(&data[2..]).unwrap();
-        let mut index = 0;
-
-        // let bytes_gap =
-        //     u64::from_str_radix(&hex::encode(&data_bytes[index..index + 32]), 16).unwrap();
-        // first 32 is bytes length each item in array
-        index += 32;
-
-        let array_length =
-            u64::from_str_radix(&hex::encode(&data_bytes[index..index + 32]), 16).unwrap();
-        index += 32;
-
-        for _ in 0..array_length {
-            let address = hex::encode(&data_bytes[index + 12..index + 32]);
-            addresses.push(format!("0x{}", address));
-            index += 32;
-        }
-
-        addresses
     }
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -215,35 +159,101 @@ impl IndexerBorrowers {
                     let address = self.extract_address(data)?;
                     let block_number = self.extract_block_number(&result[0])?;
 
-                    // user_manager
-                    //     .add_user(address.as_str(), block_number)
-                    //     .await?;
+                    let user_data = match self
+                        .user_helper
+                        .get_user_account_data(address.as_str())
+                        .await
+                    {
+                        Ok(user_data) => user_data,
+                        Err(e) => {
+                            error!("Failed to get user data: {}", e);
+                            continue;
+                        }
+                    };
 
-                    let health_factor = self.get_health_factor(&address).await;
+                    let user_reserve_data = match self
+                        .user_helper
+                        .get_user_reserve_data(address.as_str())
+                        .await
+                    {
+                        Ok(user_reserve_data) => user_reserve_data,
+                        Err(e) => {
+                            error!("Failed to get user reserve data: {}", e);
+                            continue;
+                        }
+                    };
 
-                    if health_factor.is_err() {
-                        error!(
-                            "Failed to get health factor: {} for user: {}",
-                            health_factor.err().unwrap(),
-                            address
-                        );
-                    } else {
-                        let health_factor = health_factor.unwrap();
+                    match self
+                        .db
+                        .insert_user(
+                            address.as_str(),
+                            block_number,
+                            user_data.health_factor,
+                            &user_reserve_data.leading_collateral_reserve,
+                            &user_reserve_data.leading_debt_reserve,
+                            user_data.collateral_value,
+                            user_data.debt_value,
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "Stored new user: {} at block {} with health factor: {}",
+                                address, block_number, user_data.health_factor
+                            );
+                        }
+                        Err(e) => {
+                            error!("Failed to insert user: {}, reason: {}", address, e);
+                        }
+                    }
 
-                        match self
-                            .db
-                            .insert_user(address.as_str(), block_number, health_factor)
-                            .await
-                        {
-                            Ok(_) => {
-                                info!(
-                                    "Stored new user: {} at block {} with health factor: {}",
-                                    address, block_number, health_factor
-                                );
-                            }
-                            Err(e) => {
-                                error!("Failed to insert user: {}, reason: {}", address, e);
-                            }
+                    // insert user collateral
+                    match self
+                        .db
+                        .insert_or_update_user_debt_collateral(
+                            address.as_str(),
+                            user_reserve_data
+                                .collateral_assets
+                                .into_iter()
+                                .map(|asset| (asset.address, asset.amount_in_usd))
+                                .collect::<Vec<(String, f32)>>(),
+                            true,
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "Stored new user collateral: {} at block {}",
+                                address, block_number
+                            );
+                        }
+                        Err(e) => {
+                            error!("Failed to insert user debt: {}, reason: {}", address, e);
+                        }
+                    }
+
+                    // insert user debt
+                    match self
+                        .db
+                        .insert_or_update_user_debt_collateral(
+                            address.as_str(),
+                            user_reserve_data
+                                .debt_assets
+                                .into_iter()
+                                .map(|asset| (asset.address, asset.amount_in_usd))
+                                .collect::<Vec<(String, f32)>>(),
+                            false,
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "Stored new user debt: {} at block {}",
+                                address, block_number
+                            );
+                        }
+                        Err(e) => {
+                            error!("Failed to insert user debt: {}, reason: {}", address, e);
                         }
                     }
                 }
@@ -298,55 +308,6 @@ impl IndexerBorrowers {
             tokio::time::sleep(tokio::time::Duration::from_secs(diff / 2)).await;
         }
         Ok(())
-    }
-
-    async fn get_health_factor(
-        &self,
-        user_address: &str,
-    ) -> Result<f32, Box<dyn std::error::Error>> {
-        // Eth call getUserAccountData (bf92857c)
-        let user_account_data = self
-            .provider
-            .eth_call(
-                user_address,
-                &self.config.pool_address,
-                "bf92857c",
-                vec![user_address.to_string()],
-                None,
-            )
-            .await?;
-
-        match user_account_data.get("result") {
-            Some(result) => {
-                let data = result.as_str().unwrap();
-                let hex_data = hex::decode(&data[2..]).unwrap();
-                let index_of_6th_item = 160;
-                let hex_health_factor =
-                    hex::encode(&hex_data[index_of_6th_item..index_of_6th_item + 32]);
-
-                let u256_health_factor = U256::from_str_radix(&hex_health_factor, 16)?;
-                let final_health_factor = if u256_health_factor > U256::from(u128::MAX) {
-                    self.config.cap_max_health_factor as f32
-                } else {
-                    u256_health_factor.as_u128() as f32 / 1e18 as f32
-                };
-
-                info!(
-                    "Retrieved health factor: {} for user: {}",
-                    final_health_factor, user_address
-                );
-
-                Ok(final_health_factor)
-            }
-            None => {
-                info!("No health factor found for user: {}", user_address);
-                error!(
-                    "No result found in user_account_data: {}",
-                    user_account_data
-                );
-                Ok(0.0)
-            }
-        }
     }
 }
 

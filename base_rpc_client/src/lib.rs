@@ -155,6 +155,31 @@ impl BaseRpcClient {
         let request = EthRpcRequest::new("eth_call", vec![params, json!("latest")]);
         self.make_request(&request).await
     }
+
+    pub async fn eth_call_batch(
+        &self,
+        requests: Vec<(String, String, String, Vec<String>, Option<String>)>,
+    ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+        let mut batch_requests: Vec<EthRpcRequest> = Vec::new();
+        for (from, to, function_selector, params, value) in requests {
+            let mut data = String::from(function_selector);
+            for param in params {
+                let padded_param = format!("{:0>64}", param.trim_start_matches("0x"));
+                data.push_str(&padded_param);
+            }
+            let params = json!({
+                "from": from,
+                "to": to,
+                "data": format!("0x{}", data),
+                "value": value.unwrap_or_else(|| "0x0".to_string()),
+            });
+            batch_requests.push(EthRpcRequest::new(
+                "eth_call",
+                vec![params, json!("latest")],
+            ));
+        }
+        self.make_request(&batch_requests).await
+    }
 }
 
 #[cfg(test)]

@@ -112,6 +112,10 @@ mod tests {
 
     #[test]
     fn test_find_health_factor_variant() {
+        dotenv::dotenv().ok();
+
+        println!("HEALTH_FACTORS_RANGES: {:?}", HEALTH_FACTORS_RANGES.len());
+
         // Access the generated health factor ranges globally
         for range in HEALTH_FACTORS_RANGES.iter() {
             println!("{:?}", range);
