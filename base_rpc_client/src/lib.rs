@@ -38,7 +38,6 @@ impl BaseRpcClient {
             .pool_idle_timeout(None)
             .timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(32)
-            .http2_prior_knowledge()
             .use_rustls_tls()
             .build()
             .unwrap();
@@ -68,7 +67,7 @@ impl BaseRpcClient {
                         info!("Request failed with status: {}", response.status());
                     }
                 }
-                Err(e) => info!("Request error: {}", e),
+                Err(e) => info!("Demo Request error: {:?}", e),
             }
 
             retries += 1;
