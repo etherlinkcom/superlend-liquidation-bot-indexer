@@ -10,5 +10,5 @@ ethers-types-rs = "0.1.0"
 tracing = "0.1.40"
 
 [dev-dependencies]
-tokio = { version = "1.38.0", features = ["full"] }
+tokio = { version = "1.41.1", features = ["full"] }
 dotenv = "0.15.0"

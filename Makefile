@@ -1,5 +1,5 @@
 run-bi:
-	RUST_BACKTRACE=full cargo run --bin borrowers_indexer
+	RUST_BACKTRACE=full cargo run --release --bin borrowers_indexer
 
 build-bi:
 	docker build --target final -t localUser/borrowers-indexer:latest -f borrowers_indexer/Dockerfile .
@@ -14,5 +14,11 @@ build-docker:
 	make build-bi
 	make build-hfs
 
+run-docker:
+	make build-docker
+	docker-compose up -d
+
 run-db:
-	docker compose up sqld -d
+	docker-compose down
+	rm -rf local_database
+	docker-compose up sqld -d

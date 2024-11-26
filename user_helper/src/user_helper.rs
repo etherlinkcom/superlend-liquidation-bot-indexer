@@ -147,7 +147,10 @@ impl UserHelper {
                     let hex_health_factor =
                         hex::encode(&hex_data[index_of_6th_item..index_of_6th_item + 32]);
                     let u256_health_factor = U256::from_str_radix(&hex_health_factor, 16)?;
-                    let health_factor = Self::u256_to_f32(u256_health_factor, 18);
+                    let mut health_factor = Self::u256_to_f32(u256_health_factor, 18);
+                    if health_factor > std::env::var("CAP_MAX_HEALTH_FACTOR")?.parse()? {
+                        health_factor = std::env::var("CAP_MAX_HEALTH_FACTOR")?.parse()?;
+                    }
                     health_factor
                 };
 

@@ -129,8 +129,8 @@ impl UserTableHandler for DatabaseManager {
             None => {
                 return Err(Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
-                    "Table not found",
-                )))
+                    format!("Table not found for health factor: {}", health_factor),
+                )));
             }
         };
 

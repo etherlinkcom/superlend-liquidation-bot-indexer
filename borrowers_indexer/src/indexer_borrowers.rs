@@ -8,7 +8,7 @@ use database_manager::{
     DatabaseManager,
 };
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use user_helper::UserHelper;
 
 use crate::constant::BORROW_TOPIC;
@@ -203,7 +203,7 @@ impl IndexerBorrowers {
                             );
                         }
                         Err(e) => {
-                            error!("Failed to insert user: {}, reason: {}", address, e);
+                            warn!("Failed to insert user: {}, reason: {}", address, e);
                         }
                     }
 
