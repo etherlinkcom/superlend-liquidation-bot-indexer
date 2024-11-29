@@ -11,10 +11,11 @@ use tracing_subscriber::fmt::format::FmtSpan;
 mod config;
 mod constant;
 mod indexer_borrowers;
+mod thread_pool;
 
 use config::Config;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 25)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_logging();
     let mut config = Config::load()?;
@@ -68,6 +69,7 @@ async fn create_indexer(
             delay_between_requests: config.delay_between_requests,
             wait_block_diff: config.wait_block_diff,
             cap_max_health_factor: config.cap_max_health_factor,
+            batch_size: config.batch_size,
         },
     )
     .await

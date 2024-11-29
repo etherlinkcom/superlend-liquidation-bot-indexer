@@ -27,6 +27,8 @@ pub trait UserTableHandler {
         leading_debt_reserve: &str,
         total_collateral_value_in_usd: f32,
         total_debt_value_in_usd: f32,
+        leading_collateral_reserve_value: f32,
+        leading_debt_reserve_value: f32,
     ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>> + Send;
 
     fn update_user_health_factor(
@@ -38,6 +40,8 @@ pub trait UserTableHandler {
         leading_debt_reserve: &str,
         total_collateral_value_in_usd: f32,
         total_debt_value_in_usd: f32,
+        leading_collateral_reserve_value: f32,
+        leading_debt_reserve_value: f32,
         past_table_name: &str,
     ) -> impl std::future::Future<Output = Result<(bool, String), Box<dyn std::error::Error>>> + Send;
 
@@ -80,6 +84,8 @@ impl UserTableHandler for DatabaseManager {
                     totalDebtValueInUsd REAL DEFAULT 0.0,
                     leadingCollateralReserve TEXT DEFAULT '',
                     leadingDebtReserve TEXT DEFAULT '',
+                    leadingCollateralReserveValue REAL DEFAULT 0.0,
+                    leadingDebtReserveValue REAL DEFAULT 0.0,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );",
                     variant
@@ -121,6 +127,8 @@ impl UserTableHandler for DatabaseManager {
         leading_debt_reserve: &str,
         total_collateral_value_in_usd: f32,
         total_debt_value_in_usd: f32,
+        leading_collateral_reserve_value: f32,
+        leading_debt_reserve_value: f32,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let table = health_factor_utils::find_health_factor_variant(health_factor);
 
@@ -135,21 +143,18 @@ impl UserTableHandler for DatabaseManager {
         };
 
         if let (true, _, _) = self.check_if_user_exists(user_address).await? {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "User already exists",
-            )));
+            return Ok(());
         }
 
         let conn = self.get_connection().await?;
 
         conn.execute(
             format!(
-                "INSERT OR IGNORE INTO {} (user_address, block_number, health_factor, totalCollateralValueInUsd, totalDebtValueInUsd, leadingCollateralReserve, leadingDebtReserve) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO {} (user_address, block_number, health_factor, totalCollateralValueInUsd, totalDebtValueInUsd, leadingCollateralReserve, leadingDebtReserve, leadingCollateralReserveValue, leadingDebtReserveValue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 table_name.as_str()
             )
             .as_str(),
-            (user_address, block_number as i64, health_factor, total_collateral_value_in_usd, total_debt_value_in_usd , leading_collateral_reserve, leading_debt_reserve),
+            (user_address, block_number as i64, health_factor, total_collateral_value_in_usd, total_debt_value_in_usd , leading_collateral_reserve, leading_debt_reserve, leading_collateral_reserve_value, leading_debt_reserve_value),
         )
         .await?;
 
@@ -166,6 +171,8 @@ impl UserTableHandler for DatabaseManager {
         leading_debt_reserve: &str,
         total_collateral_value_in_usd: f32,
         total_debt_value_in_usd: f32,
+        leading_collateral_reserve_value: f32,
+        leading_debt_reserve_value: f32,
         past_table_name: &str,
     ) -> Result<(bool, String), Box<dyn std::error::Error>> {
         let table = health_factor_utils::find_health_factor_variant(health_factor);
@@ -184,8 +191,8 @@ impl UserTableHandler for DatabaseManager {
         let conn = self.get_connection().await?;
         if past_table_name != table_name {
             conn.execute(
-                format!("INSERT OR IGNORE INTO {} (user_address, block_number, health_factor, totalCollateralValueInUsd, totalDebtValueInUsd, leadingCollateralReserve, leadingDebtReserve) VALUES (?, ?, ?, ?, ?, ?, ?)", table_name.as_str()).as_str(),
-                params![user_address, block_number as i64, health_factor, total_collateral_value_in_usd, total_debt_value_in_usd, leading_collateral_reserve, leading_debt_reserve],
+                format!("INSERT OR IGNORE INTO {} (user_address, block_number, health_factor, totalCollateralValueInUsd, totalDebtValueInUsd, leadingCollateralReserve, leadingDebtReserve, leadingCollateralReserveValue, leadingDebtReserveValue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", table_name.as_str()).as_str(),
+                params![user_address, block_number as i64, health_factor, total_collateral_value_in_usd, total_debt_value_in_usd, leading_collateral_reserve, leading_debt_reserve, leading_collateral_reserve_value, leading_debt_reserve_value],
             )
             .await?;
 
@@ -198,11 +205,11 @@ impl UserTableHandler for DatabaseManager {
         } else {
             conn.execute(
                 format!(
-                    "UPDATE {} SET health_factor = ?, totalCollateralValueInUsd = ?, totalDebtValueInUsd = ?, leadingCollateralReserve = ?, leadingDebtReserve = ? WHERE user_address = ?",
+                    "UPDATE {} SET health_factor = ?, totalCollateralValueInUsd = ?, totalDebtValueInUsd = ?, leadingCollateralReserve = ?, leadingDebtReserve = ?, leadingCollateralReserveValue = ?, leadingDebtReserveValue = ? WHERE user_address = ?",
                     table_name.as_str()
                 )
                 .as_str(),
-                (health_factor, total_collateral_value_in_usd, total_debt_value_in_usd, leading_collateral_reserve, leading_debt_reserve, user_address),
+                (health_factor, total_collateral_value_in_usd, total_debt_value_in_usd, leading_collateral_reserve, leading_debt_reserve, leading_collateral_reserve_value, leading_debt_reserve_value, user_address),
             )
             .await?;
 

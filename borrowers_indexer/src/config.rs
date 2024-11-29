@@ -10,6 +10,7 @@ pub struct Config {
     pub delay_between_requests: u64,
     pub wait_block_diff: u64,
     pub cap_max_health_factor: u64,
+    pub batch_size: u64,
 }
 
 impl Config {
@@ -26,6 +27,7 @@ impl Config {
             delay_between_requests: env::var("DELAY_BETWEEN_REQUESTS")?.parse()?,
             wait_block_diff: env::var("WAIT_BLOCK_DIFF_LOG_REFRESH")?.parse()?,
             cap_max_health_factor: env::var("CAP_MAX_HEALTH_FACTOR")?.parse()?,
+            batch_size: env::var("BATCH_SIZE").unwrap_or("4".to_string()).parse()?,
         })
     }
 }

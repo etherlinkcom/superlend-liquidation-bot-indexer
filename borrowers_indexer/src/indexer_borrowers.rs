@@ -1,3 +1,4 @@
+use crate::thread_pool::ThreadPool;
 use base_rpc_client::BaseRpcClient;
 use database_manager::{
     handler::{
@@ -21,9 +22,9 @@ pub struct IndexerConfig {
     pub max_parallel_requests: u64,
     pub delay_between_requests: u64,
     pub wait_block_diff: u64,
-
     #[allow(dead_code)]
     pub cap_max_health_factor: u64,
+    pub batch_size: u64,
 }
 
 // Main indexer struct
@@ -32,6 +33,7 @@ pub struct IndexerBorrowers {
     db: Arc<DatabaseManager>,
     user_helper: Arc<UserHelper>,
     config: IndexerConfig,
+    thread_pool: ThreadPool,
 }
 
 impl IndexerBorrowers {
@@ -45,6 +47,7 @@ impl IndexerBorrowers {
             db,
             config,
             user_helper: Arc::new(UserHelper::new(provider.clone()).await),
+            thread_pool: ThreadPool::default(),
         }
     }
 
@@ -76,7 +79,8 @@ impl IndexerBorrowers {
             };
             let logs = self
                 .fetch_logs(&mut start_block, block_number, batch_count)
-                .await?;
+                .await
+                .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
             self.process_logs(logs).await?;
 
             // start_block = std::cmp::min(
@@ -101,49 +105,169 @@ impl IndexerBorrowers {
         start_block: &mut u64,
         block_number: u64,
         batch_count: u64,
-    ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
-        let mut tasks = Vec::new();
+    ) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error + Send + Sync>> {
+        // info!(
+        //     "Starting fetch_logs - start_block: {}, block_number: {}, batch_count: {}",
+        //     start_block, block_number, batch_count
+        // );
 
-        for _ in 0..batch_count {
-            let start_block_clone = *start_block;
-            let end_block = std::cmp::min(
-                block_number,
-                start_block_clone + self.config.max_blocks_per_request,
-            );
+        let mut results = Vec::new();
+        let batch_size = self.config.batch_size;
+        let blocks_per_request = self.config.max_blocks_per_request;
+        let (tx, mut rx) = tokio::sync::mpsc::channel(batch_count as usize);
+
+        info!(
+            "Initialized with batch_size: {}, blocks_per_request: {}, total batches: {}, start_block: {}",
+            batch_size,
+            blocks_per_request,
+            batch_count / batch_size,
+            start_block
+        );
+
+        // Process batches in parallel using thread pool
+        for batch_num in 0..(batch_count / batch_size) {
+            let mut batch_requests = Vec::new();
+            let mut current_start = *start_block;
+
+            // info!("Processing batch {}", batch_num);
+
+            for _ in 0..batch_size {
+                let start_block_hex = format!("{:x}", current_start);
+                let end_block = std::cmp::min(block_number, current_start + blocks_per_request);
+                let end_block_hex = format!("{:x}", end_block);
+
+                // info!(
+                //     "Batch {}, Request {}: Blocks {} (0x{}) to {} (0x{})",
+                //     batch_num, req_num, current_start, start_block_hex, end_block, end_block_hex
+                // );
+
+                batch_requests.push((
+                    self.config.pool_address.clone(),
+                    start_block_hex,
+                    end_block_hex,
+                    BORROW_TOPIC.to_string(),
+                ));
+
+                current_start = end_block;
+            }
+
+            *start_block = current_start;
+
             let provider = self.provider.clone();
-            let pool_address = self.config.pool_address.clone();
-            // info!("Fetching logs from block {} to {}", start_block_clone, end_block);
-            tasks.push(tokio::spawn(async move {
-                match provider
-                    .get_logs(
-                        &pool_address,
-                        start_block_clone.to_string().as_str(),
-                        &end_block.to_string(),
-                        &BORROW_TOPIC.to_string(),
-                    )
-                    .await
-                {
-                    Ok(log) => log,
-                    Err(e) => {
-                        error!("Failed to get logs: {}", e);
-                        serde_json::Value::Null
+            let tx = tx.clone();
+            let batch_id = batch_num;
+
+            // Convert the error type to ensure Send + Sync
+            self.thread_pool
+                .execute(async move {
+                    // info!("Executing batch {} in thread pool", batch_id);
+                    let result = provider
+                        .get_batch_requests_logs(batch_requests)
+                        .await
+                        .map_err(|e| {
+                            Box::<dyn std::error::Error + Send + Sync>::from(e.to_string())
+                        });
+
+                    match result {
+                        Ok(batch_results) => {
+                            // info!(
+                            //     "Batch {} completed successfully with {} results",
+                            //     batch_id,
+                            //     batch_results.len()
+                            // );
+                            if let Err(e) = tx.send(batch_results).await {
+                                error!("Failed to send batch {} results: {}", batch_id, e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Batch {} failed: {}", batch_id, e);
+                            // Send an empty result to maintain batch count
+                            let _ = tx.send(vec![]).await;
+                        }
                     }
-                }
-            }));
-            *start_block = end_block;
+                })
+                .await;
         }
 
-        let results = futures::future::join_all(tasks).await;
-        let results = results
-            .into_iter()
-            .filter_map(|result| match result {
-                Ok(log) => Some(log),
-                Err(e) => {
-                    error!("Task join error: {}", e);
-                    None
+        // Handle remaining requests if batch_count is not divisible by batch_size
+        let remaining_requests = batch_count % batch_size;
+        if remaining_requests > 0 {
+            // info!("Processing {} remaining requests", remaining_requests);
+
+            let mut batch_requests = Vec::new();
+            let mut current_start = *start_block;
+
+            for _ in 0..remaining_requests {
+                let start_block_hex = format!("{:x}", current_start);
+                let end_block = std::cmp::min(block_number, current_start + blocks_per_request);
+                let end_block_hex = format!("{:x}", end_block);
+
+                // info!(
+                //     "Remaining Request {}: Blocks {} (0x{}) to {} (0x{})",
+                //     req_num, current_start, start_block_hex, end_block, end_block_hex
+                // );
+
+                batch_requests.push((
+                    self.config.pool_address.clone(),
+                    start_block_hex,
+                    end_block_hex,
+                    BORROW_TOPIC.to_string(),
+                ));
+
+                current_start = end_block;
+            }
+
+            *start_block = current_start;
+
+            let provider = self.provider.clone();
+            let tx = tx.clone();
+
+            self.thread_pool
+                .execute(async move {
+                    // info!("Executing remaining requests batch");
+                    let result = provider
+                        .get_batch_requests_logs(batch_requests)
+                        .await
+                        .map_err(|e| {
+                            Box::<dyn std::error::Error + Send + Sync>::from(e.to_string())
+                        });
+
+                    match result {
+                        Ok(batch_results) => {
+                            // info!(
+                            //     "Remaining batch completed successfully with {} results",
+                            //     batch_results.len()
+                            // );
+                            let _ = tx.send(batch_results).await;
+                        }
+                        Err(e) => {
+                            error!("Remaining batch failed: {}", e);
+                            let _ = tx.send(vec![]).await;
+                        }
+                    }
+                })
+                .await;
+        }
+
+        // Drop the sender to close the channel
+        drop(tx);
+        // info!("Starting to collect results");
+
+        // Collect all results
+        let mut total_results = 0;
+        while let Some(batch_results) = rx.recv().await {
+            for result in batch_results {
+                if result != serde_json::Value::Null {
+                    results.push(result);
+                    total_results += 1;
                 }
-            })
-            .collect::<Vec<serde_json::Value>>();
+            }
+        }
+
+        info!(
+            "Fetch logs completed. Total valid results: {}, Final start_block: {}",
+            total_results, start_block
+        );
 
         Ok(results)
     }
@@ -183,6 +307,20 @@ impl IndexerBorrowers {
                         }
                     };
 
+                    let leading_collateral_reserve_value = user_reserve_data
+                        .collateral_assets
+                        .iter()
+                        .find(|asset| asset.address == user_reserve_data.leading_collateral_reserve)
+                        .map(|asset| asset.amount_in_token)
+                        .unwrap_or(0.0);
+
+                    let leading_debt_reserve_value = user_reserve_data
+                        .debt_assets
+                        .iter()
+                        .find(|asset| asset.address == user_reserve_data.leading_debt_reserve)
+                        .map(|asset| asset.amount_in_token)
+                        .unwrap_or(0.0);
+
                     match self
                         .db
                         .insert_user(
@@ -193,6 +331,8 @@ impl IndexerBorrowers {
                             &user_reserve_data.leading_debt_reserve,
                             user_data.collateral_value,
                             user_data.debt_value,
+                            leading_collateral_reserve_value,
+                            leading_debt_reserve_value,
                         )
                         .await
                     {

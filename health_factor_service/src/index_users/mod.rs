@@ -141,6 +141,22 @@ impl IndexerUsers {
                             }
                         };
 
+                        let leading_collateral_reserve_value = user_reserve_data
+                            .collateral_assets
+                            .iter()
+                            .find(|asset| {
+                                asset.address == user_reserve_data.leading_collateral_reserve
+                            })
+                            .map(|asset| asset.amount_in_token)
+                            .unwrap_or(0.0);
+
+                        let leading_debt_reserve_value = user_reserve_data
+                            .debt_assets
+                            .iter()
+                            .find(|asset| asset.address == user_reserve_data.leading_debt_reserve)
+                            .map(|asset| asset.amount_in_token)
+                            .unwrap_or(0.0);
+
                         let (is_moved, moved_table_name) = self
                             .db
                             .update_user_health_factor(
@@ -151,6 +167,8 @@ impl IndexerUsers {
                                 &user_reserve_data.leading_debt_reserve,
                                 user_data.collateral_value,
                                 user_data.debt_value,
+                                leading_collateral_reserve_value,
+                                leading_debt_reserve_value,
                                 table_name,
                             )
                             .await?;
