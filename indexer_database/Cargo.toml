@@ -1,0 +1,15 @@
+[package]
+name = "indexer_database"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sea-orm.workspace = true
+
+migration = { path = "migration" }
+
+tracing.workspace = true
+
+anyhow.workspace = true
+
+chrono.workspace = true
