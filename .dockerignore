@@ -1,0 +1,53 @@
+# Development and IDE files
+.git
+.gitignore
+.env.*
+!.env.example
+.cursorrules
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build artifacts and dependencies
+target/
+**/target/
+debug/
+**/*.rs.bk
+*.pdb
+
+# Logs and temporary files
+.logs/
+*.log
+tmp/
+temp/
+
+# Documentation and non-essential files
+README.md
+CHANGELOG.md
+LICENSE
+docs/
+
+# Test files
+**/*test*
+**/*spec*
+
+# Docker files (no need to copy these into the image)
+.dockerignore
+docker_setup/
+
+# Rust specific
+Cargo.lock
+
+# Backup files
+**/*~
+**/*.bak
+
+# Local development files
+Makefile
+
+# Keep essential files
+!Cargo.toml
+!indexer/
+!indexer_database/
+!abis/

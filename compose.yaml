@@ -1,0 +1,6 @@
+services:
+  indexer:
+    image: ghcr.io/superlend/liquidation-bot-indexer:latest
+    volumes:
+      - ./logs/indexer:/app/.logs
+      - .env:/app/.env

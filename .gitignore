@@ -18,3 +18,8 @@ target/
 
 .env
 .logs
+
+compose.local.yaml
+*.sql
+logs/
+.DS_Store
