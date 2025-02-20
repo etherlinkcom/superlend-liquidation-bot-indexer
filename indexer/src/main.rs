@@ -10,6 +10,13 @@ use indexer_database::IndexerDatabase;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+/// Main entry point for the Liquidation Bot Indexer
+///
+/// This function performs the following steps:
+/// 1. Initializes the pre-run environment
+/// 2. Starts the users indexer service
+/// 3. Starts the users updater service
+/// 4. Handles if any of the services panics
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     init_pre_run().await?;
@@ -43,10 +50,6 @@ async fn main() -> Result<()> {
                         return Err(anyhow::anyhow!("Users updater service failed: {}", error_message));
                     }
 
-                    // if let Err(e) = health_factor_indexer_result {
-                    //     error!("Health factor indexer failed with error: {}", e);
-                    //     return Err(anyhow::anyhow!("Health factor indexer failed: {}", e));
-                    // }
                     info!("All indexers stopped");
                     Ok(())
                 }
@@ -60,20 +63,21 @@ async fn main() -> Result<()> {
         }
     }?;
 
-    /*
-
-
-    let users_indexer: JoinHandle<Result<()>> = UsersIndexer::new().start(&db);
-
-    let health_factor_indexer: JoinHandle<Result<()>> = HealthFactorIndexer::new().start(&db);
-
-
-
-    */
-
     Ok(())
 }
 
+/// Initializes the pre-run environment
+///
+/// This function performs the following steps:
+/// 1. Loads environment variables from the `.env` file
+/// 2. Sets up the logger
+/// 3. Reads command-line arguments
+/// 4. Initializes the database
+/// 5. Resets the database if the reset flag is provided
+/// 6. Initializes the database if it doesn't exist
+///
+/// # Returns
+/// * `Result<()>` - Success or error if any step fails
 async fn init_pre_run() -> Result<()> {
     dotenvy::dotenv().context("Failed to load environment variables")?;
     utils::logger::setup_logger().context("Failed to setup logger")?;

@@ -4,6 +4,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 
 use crate::entities::{at_risk_accounts, healthy_accounts, liquidatable_accounts};
 
+/// Represents the current status/location of a user's account in the system
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum UserCurrentLocation {
     Liquidatable,
@@ -12,6 +13,7 @@ pub enum UserCurrentLocation {
     NotFound,
 }
 
+/// Contains detailed information about a user's account status and positions
 pub struct UserDetails {
     pub id: i32,
     pub user_address: String,
@@ -27,6 +29,21 @@ pub struct UserDetails {
     pub current_location: UserCurrentLocation,
 }
 
+/// Retrieves user details from the database based on their address
+///
+/// This function searches for a user across three tables in order:
+/// 1. Liquidatable accounts
+/// 2. At-risk accounts
+/// 3. Healthy accounts
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `user_address` - Ethereum address of the user to search for
+///
+/// # Returns
+///
+/// * `Result<Option<UserDetails>>` - User details if found, None if not found in any table
 pub async fn get_user(db: &DatabaseConnection, user_address: &str) -> Result<Option<UserDetails>> {
     // First check liquidatable accounts
     if let Some(user) = liquidatable_accounts::Entity::find()
@@ -98,6 +115,17 @@ pub async fn get_user(db: &DatabaseConnection, user_address: &str) -> Result<Opt
     return Ok(None);
 }
 
+/// Deletes a user from their current location table in the database
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - User's ID in the database
+/// * `location` - Current location/status of the user (Liquidatable, AtRisk, or Healthy)
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error if user not found or deletion fails
 pub async fn delete_user(
     db: &DatabaseConnection,
     id: i32,
@@ -122,6 +150,17 @@ pub async fn delete_user(
     Ok(())
 }
 
+/// Adds a new user to the specified location table in the database
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `user` - User details to be added
+/// * `new_location` - Target table/location where the user should be added
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error if insertion fails
 pub async fn add_user(
     db: &DatabaseConnection,
     user: UserDetails,
@@ -147,6 +186,15 @@ pub async fn add_user(
     Ok(())
 }
 
+/// Converts UserDetails to a liquidatable account active model
+///
+/// # Arguments
+///
+/// * `user` - User details to convert
+///
+/// # Returns
+///
+/// * `liquidatable_accounts::ActiveModel` - Active model ready for database operations
 fn user_details_to_liquidatable_account(user: &UserDetails) -> liquidatable_accounts::ActiveModel {
     liquidatable_accounts::ActiveModel {
         user_address: Set(user.user_address.clone()),
@@ -163,6 +211,15 @@ fn user_details_to_liquidatable_account(user: &UserDetails) -> liquidatable_acco
     }
 }
 
+/// Converts UserDetails to an at-risk account active model
+///
+/// # Arguments
+///
+/// * `user` - User details to convert
+///
+/// # Returns
+///
+/// * `at_risk_accounts::ActiveModel` - Active model ready for database operations
 fn user_details_to_at_risk_account(user: &UserDetails) -> at_risk_accounts::ActiveModel {
     at_risk_accounts::ActiveModel {
         user_address: Set(user.user_address.clone()),
@@ -179,6 +236,15 @@ fn user_details_to_at_risk_account(user: &UserDetails) -> at_risk_accounts::Acti
     }
 }
 
+/// Converts UserDetails to a healthy account active model
+///
+/// # Arguments
+///
+/// * `user` - User details to convert
+///
+/// # Returns
+///
+/// * `healthy_accounts::ActiveModel` - Active model ready for database operations
 fn user_details_to_healthy_account(user: &UserDetails) -> healthy_accounts::ActiveModel {
     healthy_accounts::ActiveModel {
         user_address: Set(user.user_address.clone()),
@@ -195,6 +261,18 @@ fn user_details_to_healthy_account(user: &UserDetails) -> healthy_accounts::Acti
     }
 }
 
+/// Updates an existing user's details in their new location table
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `id` - User's ID in the database
+/// * `user` - Updated user details
+/// * `new_location` - Target table/location where the user should be updated
+///
+/// # Returns
+///
+/// * `Result<()>` - Success or error if update fails
 pub async fn update_user(
     db: &DatabaseConnection,
     id: i32,
@@ -224,41 +302,43 @@ pub async fn update_user(
     Ok(())
 }
 
-/// Get all liquidatable users
+/// Retrieves all user addresses from the liquidatable accounts table
 ///
 /// # Arguments
 ///
 /// * `db` - Database connection
 ///
 /// # Returns
-/// * `Vec<String>` - List of user addresses
 ///
+/// * `Result<Vec<String>>` - List of user addresses in liquidatable state
 pub async fn get_all_liquidatable_users(db: &DatabaseConnection) -> Result<Vec<String>> {
     let users = liquidatable_accounts::Entity::find().all(db).await?;
     Ok(users.into_iter().map(|user| user.user_address).collect())
 }
 
-/// Get all at risk users
+/// Retrieves all user addresses from the at-risk accounts table
 ///
 /// # Arguments
 ///
 /// * `db` - Database connection
 ///
 /// # Returns
-/// * `Vec<String>` - List of user addresses
+///
+/// * `Result<Vec<String>>` - List of user addresses in at-risk state
 pub async fn get_all_at_risk_users(db: &DatabaseConnection) -> Result<Vec<String>> {
     let users = at_risk_accounts::Entity::find().all(db).await?;
     Ok(users.into_iter().map(|user| user.user_address).collect())
 }
 
-/// Get all healthy users
+/// Retrieves all user addresses from the healthy accounts table
 ///
 /// # Arguments
 ///
 /// * `db` - Database connection
 ///
 /// # Returns
-/// * `Vec<String>` - List of user addresses
+///
+/// * `Result<Vec<String>>` - List of user addresses in healthy state
 pub async fn get_all_healthy_users(db: &DatabaseConnection) -> Result<Vec<String>> {
     let users = healthy_accounts::Entity::find().all(db).await?;
     Ok(users.into_iter().map(|user| user.user_address).collect())
