@@ -32,3 +32,5 @@ alloy.workspace = true
 
 # Time
 chrono.workspace = true
+
+axum.workspace = true
